@@ -1,0 +1,64 @@
+name: network-monitoring-lab
+
+mgmt:
+  network: demo2-mgmt
+  ipv4-subnet: 172.30.30.0/24
+
+topology:
+  nodes:
+    isp1:
+      kind: linux
+      image: wbitt/network-multitool:3.22.2
+      exec:
+        - ip addr add 100.64.11.1/30 dev eth1
+        - ip link set eth1 up
+        - iperf3 -s -D
+    isp2:
+      kind: linux
+      image: wbitt/network-multitool:3.22.2
+      exec:
+        - ip addr add 100.64.12.1/30 dev eth1
+        - ip link set eth1 up
+        - iperf3 -s -D
+    edge-gw:
+      kind: linux
+      image: demo2-edge-gw:latest
+      binds:
+        - ../configs/edge-gw/snmpd.conf:/etc/snmp/snmpd.conf
+        - ../configs/edge-gw/gen-traffic.sh:/gen-traffic.sh
+      exec:
+        - ip addr add 100.64.11.2/30 dev eth1
+        - ip addr add 100.64.12.2/30 dev eth2
+        - ip addr add 10.0.20.1/24 dev eth3
+        - ip link set eth1 up
+        - ip link set eth2 up
+        - ip link set eth3 up
+        - sysctl -w net.ipv4.ip_forward=1
+        - chmod +x /gen-traffic.sh
+        # -C bắt buộc: không có nó, snmpd đọc /etc/snmp/snmpd.conf hai lần
+        # (một lần từ đường dẫn mặc định, một lần từ -c) khiến agentAddress udp:161
+        # bị khai trùng và bind thất bại -> "Error opening specified endpoint".
+        - snmpd -C -c /etc/snmp/snmpd.conf
+        - sh -c "nohup /gen-traffic.sh > /var/log/gen-traffic.log 2>&1 &"
+    sw:
+      kind: linux
+      image: wbitt/network-multitool:3.22.2
+      exec:
+        - ip link add name br0 type bridge
+        - ip link set br0 up
+        - ip link set eth1 master br0
+        - ip link set eth2 master br0
+        - ip link set eth1 up
+        - ip link set eth2 up
+    host-a:
+      kind: linux
+      image: wbitt/network-multitool:3.22.2
+      exec:
+        - ip addr add 10.0.20.100/24 dev eth1
+        - ip route replace default via 10.0.20.1 dev eth1
+
+  links:
+    - endpoints: ["isp1:eth1", "edge-gw:eth1"]
+    - endpoints: ["isp2:eth1", "edge-gw:eth2"]
+    - endpoints: ["edge-gw:eth3", "sw:eth1"]
+    - endpoints: ["sw:eth2", "host-a:eth1"]

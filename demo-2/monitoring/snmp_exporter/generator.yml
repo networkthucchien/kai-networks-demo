@@ -1,0 +1,38 @@
+# Input cho snmp_exporter generator (KHÔNG phải file config chạy trực tiếp).
+# Chạy ./generate.sh để sinh ra snmp.yml (file mà snmp-exporter thực sự dùng).
+#
+# Module "network_device":
+#   IF-MIB             -> trạng thái port + băng thông
+#   HOST-RESOURCES-MIB -> RAM + Disk
+#   UCD-SNMP-MIB       -> CPU
+#
+# Vì sao CPU không lấy từ hrProcessorLoad (HOST-RESOURCES-MIB) như thiết bị mạng thật:
+# net-snmp chạy trong container không populate hrProcessorTable (`No Such Instance`),
+# dù hrDeviceTable vẫn liệt kê đủ CPU. Với Cisco/MikroTik thật thì hrProcessorLoad có
+# giá trị — khi đổi target sang thiết bị thật, thêm lại nó vào danh sách walk.
+auths:
+  public_v2:
+    community: public
+    version: 2
+
+modules:
+  network_device:
+    walk:
+      - ifDescr
+      - ifOperStatus
+      - ifHCInOctets
+      - ifHCOutOctets
+      - ifHighSpeed
+      # CPU (UCD-SNMP-MIB): ssCpuIdle là % nhàn rỗi tính trên phút gần nhất
+      # -> CPU bận = 100 - ssCpuIdle. laLoad là load average 1/5/15 phút.
+      - ssCpuIdle
+      - laLoad
+      - hrStorageDescr
+      - hrStorageAllocationUnits
+      - hrStorageSize
+      - hrStorageUsed
+    lookups:
+      - source_indexes: [ifIndex]
+        lookup: ifDescr
+      - source_indexes: [hrStorageIndex]
+        lookup: hrStorageDescr
