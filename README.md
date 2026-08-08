@@ -9,7 +9,7 @@
 
 - **Hệ điều hành:** 
   - 🖥️ **Windows (Windows 10/11):** Sử dụng **WSL 2 (Ubuntu 22.04 LTS)** + Docker + Containerlab.  
-    👉 **[XEM HƯỚNG DẪN CÀI ĐẶT CHI TIẾT DÀNH CHO HỌC VIÊN WINDOWS](deploy/WINDOWS_STUDENT_GUIDE.md)**
+    👉 **[XEM HƯỚNG DẪN CÀI ĐẶT CHI TIẾT DÀNH CHO HỌC VIÊN WINDOWS](WINDOWS_STUDENT_GUIDE.md)**
   - 🐧 **Linux (Ubuntu/Debian):** Cài trực tiếp `docker`, `docker-compose`, `containerlab`.
   - 🍎 **macOS:** Chạy Ubuntu trong Virtual Machine (UTM/Parallels/Multipass) để chạy containerlab.
 
