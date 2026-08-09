@@ -17,6 +17,12 @@
 
 ---
 
+## 📄 TÀI LIỆU TRA CỨU NHANH & CHEATSHEET
+👉 **[XEM CHEATSHEET & QUY TRÌNH CHUẨN HÓA DATA DÀNH CHO HỌC VIÊN](CHEATSHEET.md)**  
+*(Bao gồm: Công cụ Regex ẩn IP/Password, Python script làm sạch config, Khung Prompt 6 bước, Ma trận kiểm soát và Grafana MCP Prompts).*
+
+---
+
 ## 🛠️ DEMO 1: AI-ASSISTED TROUBLESHOOTING (VRRP + OSPF)
 
 ### 📌 Tình huống thực tế
