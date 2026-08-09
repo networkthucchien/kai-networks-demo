@@ -1,92 +1,128 @@
-# Demo 2: Giám sát mạng bằng Grafana (containerlab + SNMP + Prometheus)
+# Demo 2: Thực hành Giám sát Mạng bằng Grafana MCP (Model Context Protocol)
 
-## Tình huống
+## 🎯 Mục tiêu bài lab
 
-Công ty đang giám sát hệ thống bằng Grafana, leader muốn xây dựng dashboard giám sát mạng gồm:
-- Hardware Resource: CPU, RAM, Disk của thiết bị mạng.
-- Thống kê trạng thái Port Up/Down.
-- Băng thông sử dụng của 2 kênh truyền Internet.
+Học viên trực tiếp sử dụng **AI Agent thông qua Grafana MCP** để:
+1. Kết nối vào Grafana Server chung của lớp học bằng **Service Account Token** được cấp.
+2. Tự tạo **1 Thư mục (Folder) cá nhân** trên Grafana.
+3. Ra lệnh cho AI **tự động khởi tạo & thiết kế Dashboard giám sát hệ thống mạng** nằm gọn trong Folder cá nhân của mình.
 
-## Kiến trúc
+---
 
-Lab dựng 1 router biên (`edge-gw`) có 2 uplink Internet, giám sát bằng **SNMP** — cách làm giống hệt khi giám sát thiết bị mạng thật (Cisco/MikroTik/Juniper...), chỉ cần đổi target IP là dùng được với thiết bị thật.
+## 🔑 Dữ liệu cấp cho Học viên trong buổi học
 
-```mermaid
-graph LR
-    isp1["isp1<br>100.64.11.1/30"] -- eth1 --- gw["edge-gw<br>snmpd:161"]
-    isp2["isp2<br>100.64.12.1/30"] -- eth2 --- gw
-    gw -- eth3 --- sw[sw]
-    sw --- hosta["host-a<br>10.0.20.100/24"]
+Giảng viên sẽ cung cấp 2 thông số tại hội trường:
+* 🌐 **Grafana URL:** `https://demo-2.9ping.cloud`
+* 🔑 **Grafana Service Account Token:** `glsa_KxKcudBy8sB7eAL3VRnZnwXBoleEknYW_00000000` (Ví dụ Token học viên)
 
-    gw -. SNMP poll .-> snmpexp[snmp-exporter]
-    snmpexp --> prom[Prometheus]
-    prom --> graf[Grafana]
+---
+
+## 🛠️ HƯỚNG DẪN CẤU HÌNH GRAFANA MCP (CHO HỌC VIÊN)
+
+Học viên cấu hình Grafana MCP Server vào công cụ AI của mình (VS Code, Cursor, Antigravity, Claude Desktop...):
+
+### Cấu hình file `mcpServers` (JSON format):
+
+```json
+{
+  "mcpServers": {
+    "grafana": {
+      "command": "npx",
+      "args": ["-y", "@grafana/mcp-server"],
+      "env": {
+        "GRAFANA_URL": "https://demo-2.9ping.cloud",
+        "GRAFANA_SERVICE_ACCOUNT_TOKEN": "glsa_KxKcudBy8sB7eAL3VRnZnwXBoleEknYW_00000000"
+      }
+    }
+  }
+}
 ```
 
-`edge-gw` chạy sẵn script sinh traffic (`gen-traffic.sh`, `iperf3`) tới `isp1`/`isp2` để 2 kênh uplink luôn có băng thông "sống" trên dashboard khi demo.
+> **Lưu ý:** Thay thế `GRAFANA_URL` và `GRAFANA_SERVICE_ACCOUNT_TOKEN` bằng đúng thông số giảng viên cấp tại chỗ.
 
-## Chuẩn bị
+---
 
-Cần: Docker + containerlab (chạy trên host Linux, hoặc VM Linux nếu máy là macOS — containerlab dùng network namespace của Linux).
+## 📋 THỰC HÀNH TỪNG BƯỚC (STEP-BY-STEP HANDS-ON)
 
-Build image cho `edge-gw` (Debian + snmpd + iperf3):
+### 📁 Bước 1: Tạo Folder cá nhân trên Grafana
+Mở khung Chat AI và gõ Prompt:
 
+```text
+Dùng Grafana MCP tool, hãy tạo cho tôi 1 Folder mới trên Grafana có tên là "HV_NguyenVanA_Dashboard" (thay tên bạn vào đây).
+```
+
+👉 **Kết quả kỳ vọng:** AI gọi tool `create_folder` (hoặc tương đương) của Grafana MCP và thông báo Folder đã tạo thành công kèm Folder UID/URL.
+
+---
+
+### 📊 Bước 2: Ra lệnh cho AI tạo Dashboard giám sát mạng
+Gõ tiếp Prompt để AI tự sinh Dashboard:
+
+```text
+Hãy dùng Grafana MCP để tạo một Dashboard mới tên là "Network Monitoring System" nằm bên trong folder "HV_NguyenVanA_Dashboard" vừa tạo.
+
+Dashboard cần bao gồm các panel giám sát sau:
+1. Panel CPU/RAM/Disk của router biên (edge-gw).
+2. Panel Trạng thái các Port mạng (Up/Down).
+3. Panel Băng thông Traffic kênh Internet WAN1 (Interface eth1) và WAN2 (Interface eth2).
+```
+
+👉 **Kết quả kỳ vọng:** AI sẽ tự động soạn cấu hình JSON Dashboard ( PromQL queries, panel types, layout) và dùng MCP tool đẩy thẳng lên Grafana Server.
+
+---
+
+### 🔍 Bước 3: Nghiệm thu & Tinh chỉnh trên Grafana Web UI
+
+1. Mở trình duyệt truy cập: [https://demo-2.9ping.cloud](https://demo-2.9ping.cloud)
+2. Tìm đến thư mục cá nhân của bạn (VD: `HV_NguyenVanA_Dashboard`).
+3. Mở Dashboard **Network Monitoring System** vừa được AI tạo tự động.
+4. Thử ra lệnh cho AI tinh chỉnh tiếp nếu muốn (VD: *"Đổi màu panel WAN1 sang xanh neon và chỉnh thời gian refresh thành 5s"*).
+
+---
+
+## 🧪 KỊCH BẢN GIẢ LẬP SỰ CỐ "PORT DOWN" (LIVE DEMO)
+
+Để kiểm tra Dashboard có cập nhật thực tế hay không, giảng viên / học viên có thể hạ cổng mạng trên Router lab:
+
+```bash
+# Hạ cổng WAN1 (eth1) trên router edge-gw
+docker exec clab-network-monitoring-lab-edge-gw ip link set eth1 down
+```
+
+→ **Hiện tượng:** Panel Port Status chuyển sang **Đỏ (Down)** và Băng thông WAN1 tụt về **0 Mbps** trên Grafana sau 15 giây (chu kỳ scrape).
+
+Khôi phục lại cổng:
+```bash
+docker exec clab-network-monitoring-lab-edge-gw ip link set eth1 up
+```
+
+---
+
+## 🏗️ DÀNH CHO GIẢNG VIÊN (DỰNG HẠ TẦNG LAB DEMO 2)
+
+<details>
+<summary>⚠️ Bấm để xem hướng dẫn dựng Stack Prometheus + Grafana cho Server Lab</summary>
+
+### 1. Build image edge-gw
 ```bash
 cd demo-2/images
 docker build -t demo2-edge-gw:latest -f edge-gw.Dockerfile .
 ```
 
-Sinh file cấu hình `snmp_exporter` (chỉ cần chạy 1 lần, hoặc mỗi khi sửa `generator.yml`):
-
-```bash
-cd demo-2/monitoring/snmp_exporter
-./generate.sh
-```
-
-## Chạy lab
-
+### 2. Deploy Topology & Monitoring Stack
 ```bash
 cd demo-2
 sudo containerlab deploy -t topology/network-monitoring.clab.yml
-```
 
-Deploy monitoring stack (Prometheus + snmp_exporter + Grafana) — join network `demo2-mgmt` do containerlab tạo ở bước trên:
-
-```bash
 cd demo-2/monitoring
+./snmp_exporter/generate.sh
 docker compose up -d
 ```
 
-Mở Grafana: [http://localhost:3000](http://localhost:3000) (user `admin` / pass `admin`), dashboard **Network Monitoring - Demo 2** đã được provision sẵn.
+### 3. Cấp Service Account Token trên Grafana
+* Đăng nhập Grafana (admin/admin).
+* Vào **Administration** → **Users & access** → **Service accounts**.
+* Tạo Service Account mới (Role: `Admin` hoặc `Editor`) → **Add token** → Copy Token phát cho học viên.
 
-## Kiểm tra nhanh
+</details>
 
-```bash
-# port + counters SNMP trên edge-gw
-docker exec clab-network-monitoring-lab-edge-gw snmpwalk -v2c -c public localhost IF-MIB::ifOperStatus
-
-# snmp_exporter trả metric OK
-curl "http://localhost:9116/snmp?target=edge-gw&module=network_device"
-
-# Prometheus thấy target UP
-open http://localhost:9090/targets
-```
-
-## Kịch bản demo "Port Down"
-
-```bash
-docker exec clab-network-monitoring-lab-edge-gw ip link set eth1 down
-```
-
-→ Panel Port chuyển đỏ, băng thông kênh WAN1 về 0 trên Grafana trong vòng 1 chu kỳ scrape (15s). Bật lại:
-
-```bash
-docker exec clab-network-monitoring-lab-edge-gw ip link set eth1 up
-```
-
-## Dọn dẹp
-
-```bash
-cd demo-2/monitoring && docker compose down
-cd demo-2 && sudo containerlab destroy -t topology/network-monitoring.clab.yml
-```
