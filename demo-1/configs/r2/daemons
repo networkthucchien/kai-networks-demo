@@ -14,4 +14,4 @@ sharpd=no
 pbrd=no
 bfdd=no
 fabricd=no
-vrrpd=yes
+vrrpd=no

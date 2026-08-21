@@ -1,107 +1,169 @@
-# Lab: Troubleshooting Chaos — VRRP + OSPF
+# Lab: Troubleshooting Chaos — OSPF Multi-Area
 
 ## Mục tiêu
-- Rèn kỹ năng troubleshoot giao thức dự phòng gateway (VRRP).
-- Phân tích và xử lý lỗi split-brain VRRP (trùng lặp Master) và mất đồng bộ định tuyến OSPF đi kèm.
+- Rèn kỹ năng troubleshoot **có phương pháp**: thu hẹp phạm vi lỗi từng bước thay vì đoán mò.
+- Phân tích sự cố OSPF nhiều area: adjacency không hình thành, route không lan truyền.
 - **Không có gợi ý sẵn** — tự điều tra và khắc phục. Xem [`AI-TROUBLESHOOTING.md`](./AI-TROUBLESHOOTING.md) nếu muốn dùng AI hỗ trợ (không phải hỏi thẳng đáp án).
 
 ## Yêu cầu tiên quyết
-Đã nắm cách cấu hình VRRP (FRR `vrrpd`) và kết hợp với định tuyến động OSPF.
+Đã nắm OSPF nhiều area ở mức CCNA: vai trò area 0 (backbone), ABR, và các điều kiện để hai router lên neighbor.
 
 ## Tình huống
 
-Hệ thống LAN công ty dùng hai router gateway `r1` và `r2` chạy VRRP để dự phòng gateway ảo `10.0.10.1`. Đồng nghiệp báo cáo:
+Hệ thống chạy OSPF ba area, nối hai site qua backbone. Đồng nghiệp báo cáo đúng một câu:
 
-> "Tôi đã cấu hình VRRP trên cả hai router, R1 có priority 200 (đáng lẽ làm Master) và R2 có priority 100 (đáng lẽ làm Backup). Tuy nhiên mạng chập chờn liên tục. Kiểm tra trạng thái VRRP thì thấy cả R1 và R2 đều tự nhận là Master! Hơn nữa khi tắt R1 thì R2 cũng không định tuyến được traffic ra internet."
+> "srv1 không ping được srv2."
+
+Không có thêm thông tin nào khác. Không ai nói lỗi nằm ở thiết bị nào.
 
 ## Sơ đồ topology
 
 ```mermaid
-graph TD
-    subgraph wan_segment ["WAN / Backbone Segment"]
-        backbone["backbone<br>10.0.12.2/24"]
-    end
+graph LR
+    srv1["srv1<br>10.1.1.10/24"]
+    r1["r1<br>RID 1.1.1.1"]
+    r2["r2<br>RID 2.2.2.2<br>(ABR)"]
+    r3["r3<br>RID 3.3.3.3"]
+    r4["r4<br>RID 4.4.4.4"]
+    srv2["srv2<br>10.4.4.10/24"]
 
-    subgraph lan_segment ["LAN Segment (10.0.10.0/24)"]
-        r1["r1<br>VRRP IP: 10.0.10.2<br>VIP: 10.0.10.1"]
-        r2["r2<br>VRRP IP: 10.0.10.3<br>VIP: 10.0.10.1"]
-        sw[sw]
-        host-a["host-a<br>10.0.10.100/24"]
-        host-b["host-b<br>10.0.10.101/24"]
-    end
-
-    backbone -- "eth1 <-> eth2 (10.0.12.1/24)" --- r1
-    backbone -- "eth2 <-> eth2 (10.0.13.1/24)" --- r2
-    r1 -- "eth1 <-> eth3" --- sw
-    r2 -- "eth1 <-> eth4" --- sw
-    sw -- "eth1 <-> eth1" --- host-a
-    sw -- "eth2 <-> eth1" --- host-b
+    srv1 -- "10.1.1.0/24<br>Area 1" --- r1
+    r1 -- "10.12.0.0/30<br>Area 1" --- r2
+    r2 -- "10.23.0.0/30<br>Area 0 (backbone)" --- r3
+    r3 -- "10.34.0.0/30<br>Area 2" --- r4
+    r4 -- "10.4.4.0/24<br>Area 2" --- srv2
 ```
 
-Xem [`topology/chaos-vrrp.clab.yml`](./topology/chaos-vrrp.clab.yml).
+| Đoạn | Subnet | Area theo thiết kế |
+| :--- | :--- | :--- |
+| srv1 ↔ r1 | 10.1.1.0/24 | 1 |
+| r1 ↔ r2 | 10.12.0.0/30 | 1 |
+| r2 ↔ r3 | 10.23.0.0/30 | **0 (backbone)** |
+| r3 ↔ r4 | 10.34.0.0/30 | 2 |
+| r4 ↔ srv2 | 10.4.4.0/24 | 2 |
+
+Xem [`topology/chaos-ospf.clab.yml`](./topology/chaos-ospf.clab.yml).
 
 ## Chạy lab
 
 ```bash
 cd demo-1
-sudo containerlab deploy -t topology/chaos-vrrp.clab.yml
+sudo containerlab deploy -t topology/chaos-ospf.clab.yml
 ```
 
 Dọn dẹp sau khi xong:
 
 ```bash
-sudo containerlab destroy -t topology/chaos-vrrp.clab.yml
+sudo containerlab destroy -t topology/chaos-ospf.clab.yml
 ```
+
+## Bảng ánh xạ FRR ↔ Cisco IOS
+
+Lab chạy trên FRR (`vtysh`). Cú pháp gần trùng Cisco IOS — khác biệt lớn nhất là FRR khai **prefix**, Cisco khai **wildcard mask**. Khái niệm giống hệt nhau.
+
+| Việc cần làm | FRR (`vtysh`) | Cisco IOS |
+| :--- | :--- | :--- |
+| Khai network vào area | `network 10.23.0.0/30 area 0` | `network 10.23.0.0 0.0.0.3 area 0` |
+| Gỡ một khai báo network | `no network 10.23.0.0/30 area 2` | `no network 10.23.0.0 0.0.0.3 area 2` |
+| Xem neighbor | `show ip ospf neighbor` | `show ip ospf neighbor` |
+| Xem area / timer của interface | `show ip ospf interface eth1` | `show ip ospf interface Gi0/1` |
+| Xem route học qua OSPF | `show ip route ospf` | `show ip route ospf` |
+| Xem cấu hình đang chạy | `show run` | `show running-config` |
+| Lưu cấu hình | `write` | `write memory` |
 
 ## Đề bài / Yêu cầu
 
 1. Deploy topology.
-2. Xác nhận lỗi:
-   - `docker exec -it clab-chaos-vrrp-lab-r1 vtysh -c "show ip vrrp"` và tương tự trên `r2` — xác nhận cả hai đều `Master`.
-   - Ping từ host-a/host-b tới backbone (`10.0.12.2` / `10.0.13.2`) — thấy chập chờn.
-   - Thử tắt r1 (`docker exec clab-chaos-vrrp-lab-r1 ip link set eth1 down`), xác nhận host mất kết nối ra ngoài dù r2 vẫn chạy.
+2. Xác nhận triệu chứng:
+   ```bash
+   docker exec clab-chaos-ospf-lab-srv1 ping -c 4 10.4.4.10
+   ```
 3. Tìm nguyên nhân gốc. **Không có gợi ý.** Hướng điều tra:
-   - Thông số VRRP (VRID, IP ảo) trên hai router đã khớp nhau chưa?
-   - Router backup đã quảng bá đúng mạng LAN vào OSPF chưa?
+   - Adjacency có hình thành trên **mọi** link không, hay đứt ở một chặng nào?
+   - Hai đầu của link nghi ngờ có khai cùng tham số không?
+   - Route bị thiếu ở đâu — thiếu từ router nào trở đi?
 4. Sửa lỗi trực tiếp qua `vtysh` trên router liên quan.
 5. Xác nhận sửa thành công:
-   - r1 là `Master`, r2 là `Backup`.
-   - Ping từ host-a/host-b ra backbone thông ổn định.
-   - Shutdown cổng LAN r1 → r2 lên `Master`, định tuyến không gián đoạn.
-6. Ghi lại: quá trình điều tra, nguyên nhân, lệnh đã dùng để sửa.
+   - Mọi link đều có neighbor ở trạng thái `Full`.
+   - `r1` học được route tới `10.4.4.0/24`.
+   - `srv1` ping `srv2` thông, 0% packet loss.
+6. Ghi lại: quá trình điều tra, lệnh đã chạy, giả thuyết đã loại trừ, nguyên nhân cuối cùng.
+
+### Lệnh kiểm tra hữu ích
+
+```bash
+# Neighbor trên từng router
+docker exec clab-chaos-ospf-lab-r1 vtysh -c "show ip ospf neighbor"
+docker exec clab-chaos-ospf-lab-r2 vtysh -c "show ip ospf neighbor"
+docker exec clab-chaos-ospf-lab-r3 vtysh -c "show ip ospf neighbor"
+docker exec clab-chaos-ospf-lab-r4 vtysh -c "show ip ospf neighbor"
+
+# Route học qua OSPF
+docker exec clab-chaos-ospf-lab-r1 vtysh -c "show ip route ospf"
+
+# Tham số OSPF của một interface (area, timer, network type)
+docker exec clab-chaos-ospf-lab-r2 vtysh -c "show ip ospf interface eth2"
+
+# Vào CLI trực tiếp để sửa
+docker exec -it clab-chaos-ospf-lab-r3 vtysh
+```
 
 ## Lời giải tham khảo
 
 <details>
 <summary>⚠️ Bấm để xem — chỉ mở sau khi đã tự troubleshoot hoặc thật sự bí!</summary>
 
-### Lỗi 1: VRID và VIP trên r2 không khớp r1 — split-brain
-- **Triệu chứng**: cả r1 và r2 đều tự nhận Master.
-- **Chẩn đoán**: `show run` trên r2: `vrrp 20 ip 10.0.10.100` — trong khi r1 dùng `vrrp 10 ip 10.0.10.1`. Khác VRID nghĩa là hai router thuộc hai nhóm VRRP khác nhau, không nghe advertisement của nhau → mỗi bên tự làm Master nhóm riêng. VIP của r2 còn trùng IP host-a (10.0.10.100) — xung đột địa chỉ.
-- **Sửa** (trên r2 qua vtysh):
-  ```
-  conf t
-  interface eth1
-    no vrrp 20
-    vrrp 10
-    vrrp 10 ip 10.0.10.1
-    vrrp 10 priority 100
-  ```
+### Nguyên nhân: r3 khai link backbone sai area
 
-### Lỗi 2: OSPF trên r2 khai sai network — mất đường khi failover
-- **Triệu chứng**: tắt r1 thì host mất kết nối ra ngoài dù r2 còn sống.
-- **Chẩn đoán**: `show run` trên r2: `network 10.0.20.0/24 area 0` — sai, LAN thật là `10.0.10.0/24`. r2 không quảng bá LAN vào OSPF → backbone không có route trả về LAN qua r2.
-- **Sửa** (trên r2 qua vtysh):
+- **Triệu chứng**: `show ip ospf neighbor` trên `r2` **rỗng** — không thấy `3.3.3.3`. Trên `r3` chỉ thấy `4.4.4.4`. Ba chặng còn lại (`r1↔r2`, `r3↔r4`) đều `Full`. Mạng bị tách làm hai nửa: `r1`/`r2` biết `10.1.1.0/24`, `r3`/`r4` biết `10.4.4.0/24`, không bên nào biết mạng của bên kia.
+
+- **Chẩn đoán**: `show run` trên `r3`:
+  ```
+  router ospf
+    network 10.23.0.0/30 area 2      ← SAI
+    network 10.34.0.0/30 area 2
+  ```
+  Trong khi `r2` khai đúng `network 10.23.0.0/30 area 0`.
+
+- **Cơ chế**: Area ID nằm **trong gói Hello**. Hai đầu link `10.23.0.0/30` gửi Hello với Area ID khác nhau (`0.0.0.0` vs `0.0.0.2`) → mỗi bên loại bỏ Hello của bên kia → adjacency **không bao giờ** hình thành, neighbor không xuất hiện ở bất kỳ trạng thái nào (kể cả `Init`). Không có adjacency thì không trao đổi LSA, không có route.
+
+- **Lỗi thiết kế đi kèm**: với cấu hình sai này, `r3` **không có interface nào thuộc area 0** → area 2 không còn chạm backbone. Vi phạm quy tắc nền tảng của OSPF: **mọi area phải kết nối trực tiếp tới area 0**. Sau khi sửa, `r3` mới trở thành ABR giữa area 0 và area 2.
+
+- **Sửa** (trên r3 qua `vtysh`):
   ```
   conf t
   router ospf
-    no network 10.0.20.0/24 area 0
-    network 10.0.10.0/24 area 0
+    no network 10.23.0.0/30 area 2
+    network 10.23.0.0/30 area 0
+  end
+  write
   ```
 
-**Xác nhận cuối:** r1 `Master`, r2 `Backup` (`show ip vrrp`); ping từ host ra backbone ổn định; shutdown cổng LAN r1 → r2 lên Master, ping tiếp tục thông.
+**Xác nhận cuối:**
+```bash
+docker exec clab-chaos-ospf-lab-r2 vtysh -c "show ip ospf neighbor"   # 3.3.3.3 -> Full
+docker exec clab-chaos-ospf-lab-r1 vtysh -c "show ip route ospf"      # có 10.4.4.0/24
+docker exec clab-chaos-ospf-lab-srv1 ping -c 4 10.4.4.10              # 0% packet loss
+```
+
+### Vì sao 4 giả thuyết kinh điển còn lại bị loại
+
+Khi OSPF không lên neighbor, có 5 nguyên nhân hay gặp. Bài này chỉ đúng 1 — biết cách loại trừ 4 cái kia mới là kỹ năng:
+
+| Giả thuyết | Lệnh loại trừ | Kết quả thật trong lab này |
+| :--- | :--- | :--- |
+| **Area ID lệch** | `show ip ospf interface <if>` hai đầu | ✅ **Đây là nguyên nhân** — r2 `Area 0.0.0.0` vs r3 `Area 0.0.0.2` |
+| Subnet/netmask lệch | `show ip ospf interface <if>` | Loại — `10.23.0.1/30` và `10.23.0.2/30`, cùng subnet |
+| Hello/Dead timer lệch | `show ip ospf interface <if>` | Loại — cả hai `Hello 10s, Dead 40s` |
+| Authentication lệch | `show ip ospf` (dòng `Area has ... authentication`) | Loại — cả hai `Area has no authentication`.<br>⚠️ `show ip ospf interface` **không** in dòng auth khi auth tắt — đừng tìm ở đó |
+| MTU lệch | `show ip ospf interface <if>` (dòng `MTU ... bytes`) | Loại — cả hai `MTU 9500 bytes` (mặc định containerlab, không phải 1500).<br>MTU lệch làm kẹt ở `ExStart/Exchange`, **không** làm neighbor biến mất hoàn toàn như ở đây |
+
+Dấu hiệu phân biệt quan trọng: neighbor **không xuất hiện chút nào** → lỗi ở tầng Hello (area, subnet, timer, auth). Neighbor **xuất hiện rồi kẹt** ở `ExStart`/`Exchange` → nghi MTU.
 
 </details>
 
 ## Dùng AI hỗ trợ troubleshoot
-Muốn dùng AI (Claude Code...) làm trợ lý điều tra thay vì tự mò 100%? Xem quy trình và prompt mẫu tại [`AI-TROUBLESHOOTING.md`](./AI-TROUBLESHOOTING.md).
+Muốn dùng AI (ChatGPT / Claude / Gemini) làm trợ lý điều tra thay vì tự mò 100%? Xem quy trình và prompt mẫu tại [`AI-TROUBLESHOOTING.md`](./AI-TROUBLESHOOTING.md).
+
+---
+*Kịch bản lab phỏng theo [thangphan205/containerlab-demo — 18-troubleshooting-chaos-lab](https://github.com/thangphan205/containerlab-demo/tree/main/bai-tap-ve-nha/18-troubleshooting-chaos-lab).*

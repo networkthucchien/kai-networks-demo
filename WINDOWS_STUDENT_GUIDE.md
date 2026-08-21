@@ -20,7 +20,7 @@
 │  │  │                                               │  │
 │  │  ├─ Docker Engine                                │  │
 │  │  └─ Containerlab (Tạo Network Namespace ảo)      │  │
-│  │      ├─ demo-1: FRR Router (VRRP/OSPF)           │  │
+│  │      ├─ demo-1: OSPF Multi-Area (r1 → r4)        │  │
 │  │      └─ demo-2: edge-gw + Grafana + Prometheus   │  │
 │  └──────────────────────────────────────────────────┘  │
 └────────────────────────────────────────────────────────┘
@@ -77,7 +77,23 @@ containerlab version
 
 ---
 
-## 🚀 PHẦN 2: THỰC HÀNH LAB DEMO 1 (TROUBLESHOOTING VRRP + OSPF)
+### ⏱️ Bước 3: LÀM TRƯỚC BUỔI HỌC — Tải sẵn Docker Image
+
+> **Bắt buộc làm ở nhà, đừng để tới hội trường.** Wifi hội trường tải image có thể ăn hết thời lượng demo.
+
+```bash
+docker pull quay.io/frrouting/frr:10.5.1
+docker pull wbitt/network-multitool:3.22.2
+```
+
+Kiểm tra đã có đủ:
+```bash
+docker images | grep -E "frr|multitool"
+```
+
+---
+
+## 🚀 PHẦN 2: THỰC HÀNH LAB DEMO 1 (TROUBLESHOOTING OSPF MULTI-AREA)
 
 ### Bước 1: Clone Repo về máy trong WSL2
 Trong cửa sổ Ubuntu WSL2:
@@ -88,53 +104,97 @@ cd kai-networks-demo/demo-1
 
 ### Bước 2: Deploy Bài Lab Demo 1
 ```bash
-sudo containerlab deploy -t topology/chaos-vrrp.clab.yml
+sudo containerlab deploy -t topology/chaos-ospf.clab.yml
 ```
 
-### Bước 3: Thu thập Log nạp cho AI (ChatGPT/Claude/Gemini)
-Chạy 2 lệnh sau và copy toàn bộ nội dung xuất ra màn hình dán vào AI:
+Topology: `srv1 — r1 — r2 — r3 — r4 — srv2`, chạy OSPF 3 area. Thiết kế: `srv1↔r1` và `r1↔r2` thuộc **area 1**; `r2↔r3` (`10.23.0.0/30`) là **backbone area 0**; `r3↔r4` và `r4↔srv2` thuộc **area 2**.
+
+### Bước 3: Xác nhận Triệu chứng & Thu thập Log nạp cho AI
+Đồng nghiệp chỉ báo đúng một câu: *"srv1 không ping được srv2."*
+
 ```bash
-docker exec clab-chaos-vrrp-lab-r1 vtysh -c "show ip vrrp"
-docker exec clab-chaos-vrrp-lab-r2 vtysh -c "show ip vrrp"
+# Triệu chứng gốc
+docker exec clab-chaos-ospf-lab-srv1 ping -c 4 10.4.4.10
+
+# Trạng thái adjacency toàn mạng
+docker exec clab-chaos-ospf-lab-r1 vtysh -c "show ip ospf neighbor"
+docker exec clab-chaos-ospf-lab-r2 vtysh -c "show ip ospf neighbor"
+docker exec clab-chaos-ospf-lab-r3 vtysh -c "show ip ospf neighbor"
+docker exec clab-chaos-ospf-lab-r4 vtysh -c "show ip ospf neighbor"
+
+# Route học được ở hai đầu
+docker exec clab-chaos-ospf-lab-r1 vtysh -c "show ip route ospf"
+docker exec clab-chaos-ospf-lab-r4 vtysh -c "show ip route ospf"
 ```
+
+Copy toàn bộ nội dung xuất ra màn hình dán vào AI.
 
 ### Bước 4: Đặt Prompt cho AI để nhận gợi ý chẩn đoán
 ```text
-Bối cảnh: Mạng LAN 10.0.10.0/24 dùng 2 router r1/r2 chạy VRRP (VIP 10.0.10.1), nối backbone qua OSPF area 0 trên FRR.
-Triệu chứng: Cả r1 và r2 đều báo trạng thái MASTER (Split-brain). Tắt r1 thì máy trạm mất mạng dù r2 vẫn bật.
-Dữ liệu: [Dán kết quả 2 lệnh show ip vrrp vào đây]
+Bối cảnh: Lab OSPF 3 area trên FRR (vtysh). Topology chuỗi: srv1(10.1.1.10) — r1 — r2 — r3 — r4 — srv2(10.4.4.10).
+Thiết kế: srv1↔r1 và r1↔r2 thuộc area 1; r2↔r3 (10.23.0.0/30) là backbone area 0; r3↔r4 và r4↔srv2 thuộc area 2.
+Triệu chứng: srv1 không ping được srv2.
+Dữ liệu: [Dán output show ip ospf neighbor của 4 router và show ip route ospf vào đây]
 
 Yêu cầu:
-1. Phân tích dữ liệu và liệt kê 3 giả thuyết nguyên nhân từ xác suất cao xuống thấp.
-2. Với mỗi giả thuyết, gợi ý ĐÚNG 1 LỆNH show để tôi tự kiểm chứng loại trừ.
-3. RÀNG BUỘC: CHƯA ĐƯA CÂU LỆNH CẤU HÌNH SỬA LỖI.
+1. Dựa trên dữ liệu, cho biết adjacency đứt ở chặng nào.
+2. Liệt kê 3 giả thuyết nguyên nhân từ xác suất cao xuống thấp.
+3. Với mỗi giả thuyết, gợi ý ĐÚNG 1 LỆNH show để tôi tự kiểm chứng loại trừ.
+4. RÀNG BUỘC: CHƯA ĐƯA CÂU LỆNH CẤU HÌNH SỬA LỖI. Đánh dấu [CẦN XÁC NHẬN] ở điểm bạn đang giả định.
 ```
 
-### Bước 5: Thực hành gõ lệnh sửa lỗi trên Router r2
-Vào môi trường CLI của Router r2:
+### Bước 5: Tự chạy lệnh loại trừ giả thuyết
+AI sẽ nêu nhóm nguyên nhân kinh điển làm OSPF không lên neighbor. **Đúng một cái là nguyên nhân thật** — tự chạy lệnh loại trừ, đừng tin ngay cái AI xếp đầu bảng:
+
+| # | Giả thuyết | Lệnh loại trừ |
+| :--- | :--- | :--- |
+| 1 | Area ID hai đầu lệch nhau | `show ip ospf interface <if>` hai đầu, so `Area` |
+| 2 | Subnet/netmask hai đầu lệch | `show ip ospf interface <if>`, so `Internet Address` |
+| 3 | Hello/Dead timer lệch | `show ip ospf interface <if>`, so `Timer intervals` |
+| 4 | Authentication lệch | `show ip ospf`, so `Area has ... authentication` |
+| 5 | MTU lệch | `show ip ospf interface <if>`, so `MTU ... bytes` |
+
+Ví dụ so sánh hai đầu link nghi ngờ:
 ```bash
-docker exec -it clab-chaos-vrrp-lab-r2 vtysh
+docker exec clab-chaos-ospf-lab-r2 vtysh -c "show ip ospf interface eth2"
+docker exec clab-chaos-ospf-lab-r3 vtysh -c "show ip ospf interface eth1"
 ```
-Gõ các câu lệnh sửa (đã xác minh qua AI):
+
+💡 **Mẹo:** neighbor **không xuất hiện chút nào** → lỗi tầng Hello (nhóm 1–4). Neighbor **xuất hiện rồi kẹt** ở `ExStart`/`Exchange` → nghi MTU.
+
+### Bước 6: Sửa lỗi & Xác nhận đủ 3 tầng
+Sau khi tự xác định được tham số lệch, vào CLI router liên quan để sửa:
+```bash
+docker exec -it clab-chaos-ospf-lab-r3 vtysh
+```
+
+<details>
+<summary>⚠️ <b>ĐÁP ÁN — chỉ mở sau khi đã tự làm Bước 5 hoặc thật sự bí!</b></summary>
+
+**Nguyên nhân:** `r3` khai link backbone sai area (`area 2` thay vì `area 0`). Area ID nằm trong gói Hello — hai đầu lệch nhau thì adjacency không bao giờ hình thành.
+
 ```vtysh
 conf t
-interface eth1
-  no vrrp 20
-  vrrp 10
-  vrrp 10 ip 10.0.10.1
-  vrrp 10 priority 100
-exit
 router ospf
-  no network 10.0.20.0/24 area 0
-  network 10.0.10.0/24 area 0
+  no network 10.23.0.0/30 area 2
+  network 10.23.0.0/30 area 0
 end
 write
 exit
 ```
 
-### Bước 6: Dọn dẹp bài lab
+</details>
+
+Verify **cả ba tầng** — đừng dừng ở "ping thông":
 ```bash
-sudo containerlab destroy -t topology/chaos-vrrp.clab.yml
+docker exec clab-chaos-ospf-lab-r2 vtysh -c "show ip ospf neighbor"   # 1. adjacency lên Full
+docker exec clab-chaos-ospf-lab-r1 vtysh -c "show ip route ospf"      # 2. có route 10.4.4.0/24
+docker exec clab-chaos-ospf-lab-srv1 ping -c 4 10.4.4.10              # 3. dữ liệu thật đi được
+```
+
+### Bước 7: Dọn dẹp bài lab
+```bash
+sudo containerlab destroy -t topology/chaos-ospf.clab.yml
 ```
 
 ---
@@ -185,6 +245,22 @@ docker exec clab-network-monitoring-lab-edge-gw ip link set eth1 up
 cd ~/kai-networks-demo/demo-2/monitoring && docker compose down
 cd ~/kai-networks-demo/demo-2 && sudo containerlab destroy -t topology/network-monitoring.clab.yml
 ```
+
+---
+
+## 🗺️ PHỤ LỤC: ÁNH XẠ CÚ PHÁP FRR ↔ CISCO IOS
+
+Lab chạy trên FRR (`vtysh`). Cú pháp gần trùng Cisco IOS — khác biệt lớn nhất là FRR khai **prefix**, Cisco khai **wildcard mask**. Khái niệm giống hệt nhau.
+
+| Việc cần làm | FRR (`vtysh`) | Cisco IOS |
+| :--- | :--- | :--- |
+| Khai network vào area | `network 10.23.0.0/30 area 0` | `network 10.23.0.0 0.0.0.3 area 0` |
+| Gỡ một khai báo network | `no network 10.23.0.0/30 area 2` | `no network 10.23.0.0 0.0.0.3 area 2` |
+| Xem neighbor | `show ip ospf neighbor` | `show ip ospf neighbor` |
+| Xem area / timer của interface | `show ip ospf interface eth1` | `show ip ospf interface Gi0/1` |
+| Xem route học qua OSPF | `show ip route ospf` | `show ip route ospf` |
+| Xem cấu hình đang chạy | `show run` | `show running-config` |
+| Lưu cấu hình | `write` | `write memory` |
 
 ---
 

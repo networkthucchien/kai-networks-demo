@@ -1,7 +1,7 @@
 # 🚀 BÀI LAB THỰC HÀNH: AI IN NETWORKING (DEMO DECK & LAB GUIDE)
 
 > **Dành cho Học viên CCNA / Kỹ sư Mạng**  
-> **Mục tiêu:** Thực hành áp dụng AI (ChatGPT, Claude, Gemini) như một **Trợ lý vận hành chuyên nghiệp** để giải quyết 2 bài toán thực tế: **Troubleshooting sự cố mạng** và **Tự động hóa Giám sát hệ thống (Grafana/SNMP)**.
+> **Mục tiêu:** Thực hành áp dụng AI (ChatGPT, Claude, Gemini) như một **Trợ lý vận hành chuyên nghiệp** để giải quyết 2 bài toán thực tế: **Troubleshooting sự cố OSPF** và **Tự động hóa Giám sát hệ thống (Grafana/SNMP)**.
 
 ---
 
@@ -23,12 +23,20 @@
 
 ---
 
-## 🛠️ DEMO 1: AI-ASSISTED TROUBLESHOOTING (VRRP + OSPF)
+## 🛠️ DEMO 1: AI-ASSISTED TROUBLESHOOTING (OSPF MULTI-AREA)
 
 ### 📌 Tình huống thực tế
-Hệ thống mạng LAN công ty (`10.0.10.0/24`) dùng 2 Router gateway `r1` (Priority 200 - Master) và `r2` (Priority 100 - Backup) chạy **VRRP** dự phòng VIP `10.0.10.1`, định tuyến ra backbone qua **OSPF Area 0**.  
-Đồng nghiệp báo sự cố:  
-> *"Mạng chập chờn liên tục. Kiểm tra thấy CẢ HAI Router đều tự nhận là MASTER (Split-brain)! Khi tắt r1 thì máy trạm hoàn toàn mất kết nối ra internet dù r2 vẫn đang bật."*
+Hệ thống chạy **OSPF ba area** nối hai site qua backbone: `srv1 — r1 — r2 — r3 — r4 — srv2`.  
+Đồng nghiệp báo sự cố **đúng một câu, không thêm thông tin gì khác**:
+> *"srv1 không ping được srv2."*
+
+| Đoạn | Subnet | Area theo thiết kế |
+| :--- | :--- | :--- |
+| srv1 ↔ r1 | `10.1.1.0/24` | 1 |
+| r1 ↔ r2 | `10.12.0.0/30` | 1 |
+| r2 ↔ r3 | `10.23.0.0/30` | **0 (backbone)** |
+| r3 ↔ r4 | `10.34.0.0/30` | 2 |
+| r4 ↔ srv2 | `10.4.4.0/24` | 2 |
 
 ---
 
@@ -36,60 +44,105 @@ Hệ thống mạng LAN công ty (`10.0.10.0/24`) dùng 2 Router gateway `r1` (P
 - **KHÔNG đoán mò hay gõ lệnh ngẫu nhiên.**
 - Thu thập log/output thực tế ➔ Nạp cho AI theo **Khung Prompt chuẩn 6 bước**.
 - Dùng AI làm "Đồng nghiệp Senior" để khoanh vùng giả thuyết và lấy lệnh `show` kiểm chứng.
-- Tự gõ lệnh sửa lỗi trên Lab và Verify kịch bản Failover.
+- Tự loại trừ 5 nguyên nhân kinh điển khiến OSPF không lên neighbor, rồi tự gõ lệnh sửa.
 
 ---
 
 ### 📋 Các bước học viên thực hiện
 
+#### Bước 0: Thí nghiệm 2 phút — cho AI đoán khi CHƯA có dữ liệu
+Trước khi thu thập gì cả, hỏi AI đúng một câu:
+```text
+Mạng OSPF ba area, srv1 không ping được srv2. Nguyên nhân là gì?
+```
+Quan sát: AI có nói thẳng một nguyên nhân như thể nó biết chắc không? Bao nhiêu ý trong câu trả lời thực sự áp dụng được cho topology mà nó **chưa hề nhìn thấy**?
+
+👉 **Bài học:** AI **mù bối cảnh**. Càng ít dữ liệu, nó càng lấp đầy bằng suy đoán — với giọng văn tự tin y hệt lúc nó đúng.
+
 #### Bước 1: Deploy Bài Lab
 ```bash
 cd demo-1
-sudo containerlab deploy -t topology/chaos-vrrp.clab.yml
+sudo containerlab deploy -t topology/chaos-ospf.clab.yml
 ```
 
 #### Bước 2: Thu thập Dữ liệu Triệu chứng
 Chạy các lệnh kiểm tra và copy toàn bộ Output (không mô tả bằng lời):
 ```bash
-# Kiểm tra trạng thái VRRP trên 2 router
-docker exec clab-chaos-vrrp-lab-r1 vtysh -c "show ip vrrp"
-docker exec clab-chaos-vrrp-lab-r2 vtysh -c "show ip vrrp"
+# Triệu chứng gốc
+docker exec clab-chaos-ospf-lab-srv1 ping -c 4 10.4.4.10
 
-# Kiểm tra kết nối từ Host
-docker exec clab-chaos-vrrp-lab-host-a ping -c 4 10.0.12.2
+# Trạng thái adjacency toàn mạng
+docker exec clab-chaos-ospf-lab-r1 vtysh -c "show ip ospf neighbor"
+docker exec clab-chaos-ospf-lab-r2 vtysh -c "show ip ospf neighbor"
+docker exec clab-chaos-ospf-lab-r3 vtysh -c "show ip ospf neighbor"
+docker exec clab-chaos-ospf-lab-r4 vtysh -c "show ip ospf neighbor"
+
+# Route học được ở hai đầu
+docker exec clab-chaos-ospf-lab-r1 vtysh -c "show ip route ospf"
+docker exec clab-chaos-ospf-lab-r4 vtysh -c "show ip route ospf"
 ```
 
 #### Bước 3: Đặt Prompt cho AI (Khóa lệnh sửa lỗi)
 Copy prompt mẫu sau dán vào AI cùng với Output ở Bước 2:
 ```text
-Bối cảnh: Mạng LAN 10.0.10.0/24 dùng 2 router r1/r2 chạy VRRP (VIP 10.0.10.1), nối backbone qua OSPF area 0 trên FRR.
-Triệu chứng: Cả r1 và r2 đều báo trạng thái MASTER. Tắt r1 thì máy trạm mất mạng dù r2 vẫn bật.
-Dữ liệu: [Dán Output show ip vrrp ở Bước 2 vào đây]
+Bối cảnh: Lab OSPF 3 area trên FRR (vtysh). Topology chuỗi: srv1(10.1.1.10) — r1 — r2 — r3 — r4 — srv2(10.4.4.10).
+Thiết kế: srv1↔r1 và r1↔r2 thuộc area 1; r2↔r3 (10.23.0.0/30) là backbone area 0; r3↔r4 và r4↔srv2 thuộc area 2.
+Triệu chứng: srv1 không ping được srv2.
+Dữ liệu: [Dán output show ip ospf neighbor của 4 router và show ip route ospf ở Bước 2 vào đây]
 
 Yêu cầu:
-1. Phân tích dữ liệu và đưa ra 3 giả thuyết khả dĩ nhất từ xác suất cao xuống thấp.
-2. Với mỗi giả thuyết, gợi ý ĐÚNG 1 LỆNH show để tôi tự kiểm chứng.
-3. RÀNG BUỘC: CHƯA ĐƯA CÂU LỆNH CẤU HÌNH SỬA LỖI.
+1. Dựa trên dữ liệu, cho biết adjacency đứt ở chặng nào.
+2. Đưa ra 3 giả thuyết khả dĩ nhất từ xác suất cao xuống thấp.
+3. Với mỗi giả thuyết, gợi ý ĐÚNG 1 LỆNH show để tôi tự kiểm chứng.
+4. RÀNG BUỘC: CHƯA ĐƯA CÂU LỆNH CẤU HÌNH SỬA LỖI. Đánh dấu [CẦN XÁC NHẬN] ở điểm bạn đang giả định.
 ```
 
-#### Bước 4: Tự Kiểm chứng & Sửa lỗi
-AI sẽ gợi ý kiểm tra cấu hình (`show run`). Sau khi thu thập `show run`, bạn sẽ phát hiện 2 lỗi độc lập:
-1. **Lỗi 1 (VRRP Split-Brain):** `r2` khai sai VRID (`vrrp 20` thay vì `vrrp 10`) và VIP trùng IP host.  
-   ➔ **Sửa trên r2:** Chỉnh lại `vrrp 10` và VIP `10.0.10.1`.
-2. **Lỗi 2 (OSPF Routing):** `r2` khai nhầm network `10.0.20.0/24` thay vì `10.0.10.0/24`.  
-   ➔ **Sửa trên r2:** Khai báo đúng `network 10.0.10.0/24 area 0`.
+#### Bước 4: Tự Loại trừ Giả thuyết
+AI sẽ nêu nhóm nguyên nhân kinh điển làm OSPF không lên neighbor. **Đúng một cái là nguyên nhân thật** — việc của bạn là chạy lệnh loại trừ, không phải tin cái AI xếp đầu bảng:
 
-#### Bước 5: Kiểm tra lại (Verify Failover)
+| # | Giả thuyết | Lệnh loại trừ |
+| :--- | :--- | :--- |
+| 1 | Area ID hai đầu lệch nhau | `show ip ospf interface <if>` hai đầu, so `Area` |
+| 2 | Subnet/netmask hai đầu lệch | `show ip ospf interface <if>`, so `Internet Address` |
+| 3 | Hello/Dead timer lệch | `show ip ospf interface <if>`, so `Timer intervals` |
+| 4 | Authentication lệch | `show ip ospf`, so `Area has ... authentication` |
+| 5 | MTU lệch | `show ip ospf interface <if>`, so `MTU ... bytes` |
+
+💡 **Mẹo đọc dấu hiệu:** neighbor **không xuất hiện chút nào** → lỗi tầng Hello (nhóm 1–4). Neighbor **xuất hiện rồi kẹt** ở `ExStart`/`Exchange` → nghi MTU.
+
+#### Bước 5: Sửa lỗi & Xác nhận đủ 3 tầng
+Sau khi xác định được tham số lệch, vào router liên quan sửa qua `vtysh`, rồi verify **cả ba tầng** — đừng dừng ở "ping thông":
 ```bash
-# Tắt cổng eth1 của r1 để giả lập sự cố
-docker exec clab-chaos-vrrp-lab-r1 ip link set eth1 down
-
-# Kiểm tra r2 tự động chuyển thành Master và host-a vẫn ping thông
-docker exec clab-chaos-vrrp-lab-r2 vtysh -c "show ip vrrp"
-docker exec clab-chaos-vrrp-lab-host-a ping -c 4 10.0.12.2
+docker exec clab-chaos-ospf-lab-r2 vtysh -c "show ip ospf neighbor"   # 1. adjacency lên Full
+docker exec clab-chaos-ospf-lab-r1 vtysh -c "show ip route ospf"      # 2. có route 10.4.4.0/24
+docker exec clab-chaos-ospf-lab-srv1 ping -c 4 10.4.4.10              # 3. dữ liệu thật đi được
 ```
 
-📄 **Hướng dẫn chi tiết:** Xem file [`demo-1/README.md`](demo-1/README.md) và quy trình troubleshooting tại [`demo-1/AI-TROUBLESHOOTING.md`](demo-1/AI-TROUBLESHOOTING.md).
+<details>
+<summary>⚠️ <b>ĐÁP ÁN — chỉ mở sau khi đã tự troubleshoot hoặc thật sự bí!</b></summary>
+
+**Nguyên nhân:** `r3` khai link backbone sai area — `network 10.23.0.0/30 area 2` trong khi `r2` khai `area 0`.
+
+Area ID nằm **trong gói Hello**. Hai đầu link gửi Hello với Area ID khác nhau (`0.0.0.0` vs `0.0.0.2`) → mỗi bên loại bỏ Hello của bên kia → adjacency **không bao giờ** hình thành. Không adjacency thì không trao đổi LSA, không có route.
+
+Cấu hình sai còn khiến `r3` không có interface nào thuộc area 0 → **area 2 mất kết nối backbone**, vi phạm quy tắc nền tảng "mọi area phải chạm area 0".
+
+**Sửa trên r3:**
+```bash
+docker exec -it clab-chaos-ospf-lab-r3 vtysh
+```
+```
+conf t
+router ospf
+  no network 10.23.0.0/30 area 2
+  network 10.23.0.0/30 area 0
+end
+write
+```
+
+</details>
+
+📄 **Hướng dẫn chi tiết:** Xem file [`demo-1/README.md`](demo-1/README.md) (kèm bảng ánh xạ cú pháp **FRR ↔ Cisco IOS**) và quy trình troubleshooting tại [`demo-1/AI-TROUBLESHOOTING.md`](demo-1/AI-TROUBLESHOOTING.md).
 
 ---
 
@@ -165,7 +218,7 @@ docker exec clab-network-monitoring-lab-edge-gw ip link set eth1 up
 ```bash
 # Dọn dẹp Demo 1
 cd demo-1
-sudo containerlab destroy -t topology/chaos-vrrp.clab.yml
+sudo containerlab destroy -t topology/chaos-ospf.clab.yml
 
 # Dọn dẹp Demo 2
 cd ../demo-2/monitoring && docker compose down
